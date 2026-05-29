@@ -3,7 +3,6 @@
 # =========================
 
 target/
-Cargo.lock
 
 # Rust analyzer / IDE
 .vscode/
