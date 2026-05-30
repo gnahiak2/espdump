@@ -1,5 +1,9 @@
+// spi_flash.c
 #include "spi_flash.h"
 #include "driver/spi_master.h"
+#include "esp_err.h"
+#include "esp_log.h"
+#include <string.h>
 
 #define PIN_MOSI 11
 #define PIN_MISO 13
@@ -7,8 +11,9 @@
 #define PIN_CS   10
 
 static spi_device_handle_t spi;
+static const char *TAG = "spi_flash";
 
-static void spi_cmd(
+static esp_err_t spi_cmd(
     uint8_t *tx,
     uint8_t *rx,
     int bytes
@@ -20,7 +25,7 @@ static void spi_cmd(
         .rx_buffer = rx
     };
 
-    spi_device_transmit(spi, &t);
+    return spi_device_transmit(spi, &t);
 }
 
 void spi_flash_init()
@@ -40,8 +45,17 @@ void spi_flash_init()
         .queue_size = 1
     };
 
-    spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
-    spi_bus_add_device(SPI2_HOST, &devcfg, &spi);
+    esp_err_t ret = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "spi_bus_initialize failed: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    ret = spi_bus_add_device(SPI2_HOST, &devcfg, &spi);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "spi_bus_add_device failed: %s", esp_err_to_name(ret));
+        return;
+    }
 }
 
 void spi_read_jedec(uint8_t *buf)
@@ -49,7 +63,12 @@ void spi_read_jedec(uint8_t *buf)
     uint8_t tx[4] = {0x9F, 0,0,0};
     uint8_t rx[4] = {0};
 
-    spi_cmd(tx, rx, 4);
+    esp_err_t err = spi_cmd(tx, rx, 4);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "spi_cmd JEDEC failed: %s", esp_err_to_name(err));
+        buf[0] = buf[1] = buf[2] = 0;
+        return;
+    }
 
     buf[0] = rx[1];
     buf[1] = rx[2];
@@ -76,13 +95,19 @@ void spi_flash_read(
         .rx_buffer = buf
     };
 
-    spi_device_transmit(spi, &t);
+    esp_err_t err = spi_device_transmit(spi, &t);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "spi_flash_read failed: %s", esp_err_to_name(err));
+    }
 }
 
 void spi_flash_write_enable()
 {
     uint8_t cmd = 0x06;
-    spi_cmd(&cmd, NULL, 1);
+    esp_err_t err = spi_cmd(&cmd, NULL, 1);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "spi_flash_write_enable failed: %s", esp_err_to_name(err));
+    }
 }
 
 void spi_flash_wait_busy()
@@ -91,7 +116,11 @@ void spi_flash_wait_busy()
     uint8_t rx[2];
 
     do {
-        spi_cmd(tx, rx, 2);
+        esp_err_t err = spi_cmd(tx, rx, 2);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "spi_flash_wait_busy cmd failed: %s", esp_err_to_name(err));
+            break;
+        }
     } while (rx[1] & 0x01);
 }
 
@@ -106,7 +135,10 @@ void spi_flash_sector_erase(uint32_t addr)
         addr & 0xFF
     };
 
-    spi_cmd(tx, NULL, 4);
+    esp_err_t err = spi_cmd(tx, NULL, 4);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "spi_flash_sector_erase cmd failed: %s", esp_err_to_name(err));
+    }
 
     spi_flash_wait_busy();
 }
@@ -126,7 +158,7 @@ void spi_flash_page_program(
     tx[2] = (addr >> 8) & 0xFF;
     tx[3] = addr & 0xFF;
 
-    for (int i = 0; i < len; i++)
+    for (int i = 0; i < (int)len; i++)
         tx[4 + i] = buf[i];
 
     spi_transaction_t t = {
@@ -134,7 +166,10 @@ void spi_flash_page_program(
         .tx_buffer = tx
     };
 
-    spi_device_transmit(spi, &t);
+    esp_err_t err = spi_device_transmit(spi, &t);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "spi_flash_page_program failed: %s", esp_err_to_name(err));
+    }
 
     spi_flash_wait_busy();
 }
